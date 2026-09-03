@@ -1,0 +1,7 @@
+# Hostinger Node.js hosting manages the public reverse proxy.
+# Do not proxy to a hardcoded local port from this file.
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+</IfModule>
