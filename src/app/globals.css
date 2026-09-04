@@ -644,6 +644,24 @@ h1, h2, h3, h4, h5, h6 { font-family: 'Space Grotesk', sans-serif; }
 .alert-info     { border-left: 3px solid #38BDF8; background: rgba(56,189,248,0.04); }
 
 /* ==============================
+   WALKTHROUGH TOUR – BLUR / ACTIVE SECTIONS
+============================== */
+.tour-blur-section {
+  filter: blur(8px) brightness(0.3);
+  opacity: 0.25;
+  pointer-events: none;
+  transition: filter 0.45s ease, opacity 0.45s ease;
+}
+
+.tour-active-section {
+  filter: none;
+  opacity: 1;
+  position: relative;
+  z-index: 203 !important;
+  transition: filter 0.45s ease, opacity 0.45s ease;
+}
+
+/* ==============================
    REDUCED MOTION
 ============================== */
 @media (prefers-reduced-motion: reduce) {
