@@ -83,7 +83,7 @@ export function Footer() {
             <h4 className="font-heading font-semibold text-main text-sm mb-3 text-orange-electric">Key Metrics</h4>
             <ul className="space-y-2 text-muted">
               <li className="flex items-center justify-between"><span>Bill Savings:</span><strong className="text-green-savings font-mono-num">20–30%</strong></li>
-              <li className="flex items-center justify-between"><span>Edge Hardware:</span><strong className="text-orange-golden font-mono-num">Rs. 7,500</strong></li>
+              <li className="flex items-center justify-between"><span>Edge Hardware:</span><strong className="text-orange-golden font-mono-num">Rs. 7-8K</strong></li>
               <li className="flex items-center justify-between"><span>Backup Extend:</span><strong className="text-ai font-mono-num">+2.1 Hours</strong></li>
             </ul>
           </div>

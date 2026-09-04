@@ -41,7 +41,7 @@ const impactStats = [
   { label: "Peak tariff defended",     value: "5–9 PM",    icon: Gauge,     end: null },
   { label: "Projected monthly saving", value: "Rs. 6,550", icon: PiggyBank, end: 6550 },
   { label: "Backup extension",         value: "+2.1 hrs",  icon: Battery,   end: null },
-  { label: "Edge deployment cost",     value: "Rs. 3,300", icon: Cpu,       end: 3300 },
+  { label: "Edge deployment cost",     value: "Rs. 7-8K", icon: Cpu,       end: 7500 },
 ];
 
 const deviceNodes = [
@@ -131,14 +131,14 @@ export default function LandingPage() {
               An AI energy agent for Pakistani homes that reduces bills by{" "}
               <strong className="text-main">20–30%</strong>, handles peak-hour load, detects phantom
               waste, and protects backup power — all autonomously on a{" "}
-              <strong className="text-orange-electric">Rs. 3,300 ESP32</strong>.
+              <strong className="text-orange-electric">Rs. 7-8K ESP32</strong>.
             </motion.p>
 
             {/* Key numbers */}
             <motion.div variants={fade(0.35)} className="flex flex-wrap gap-4 mb-8">
               {[
                 { v: "20–30%", label: "Bill Reduction" },
-                { v: "Rs. 3,300", label: "Hardware Cost" },
+                { v: "Rs. 7-8K", label: "Hardware Cost" },
                 { v: "+2.1 hrs", label: "Backup Extended" },
               ].map((s) => (
                 <div key={s.label} className="glass-card px-4 py-2.5 text-center min-w-[100px]">

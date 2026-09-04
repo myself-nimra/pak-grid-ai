@@ -3,7 +3,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Brain, Zap, Snowflake, Tv, Droplets, Wind, Refrigerator, Ghost,
-  CheckCircle, Clock, Power, Sparkles, TrendingDown, MessageSquare, Loader2, Send
+  CheckCircle, XCircle, RotateCcw, Clock, Power, Sparkles, TrendingDown, MessageSquare, Loader2, Send
 } from "lucide-react";
 
 const appliances = [
@@ -45,6 +45,62 @@ export default function AIAgentPage() {
   const [aiError, setAiError] = useState("");
   const [userQuestion, setUserQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
+  const [recommendationStatus, setRecommendationStatus] = useState<"pending" | "accepted" | "rejected" | "automated">("pending");
+  const [decisionTimeline, setDecisionTimeline] = useState(decisions);
+
+  const handleAccept = () => {
+    setRecommendationStatus("accepted");
+    setApplianceStates((p) => ({ ...p, pump: false }));
+    const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    setDecisionTimeline((prev) => [
+      {
+        time: now,
+        text: "Water pump shifted to 10:42 PM (Accepted by User)",
+        saving: "Rs. 480/month saved",
+        icon: Droplets,
+        color: "text-green-savings",
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleReject = () => {
+    setRecommendationStatus("rejected");
+    const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    setDecisionTimeline((prev) => [
+      {
+        time: now,
+        text: "Water pump recommendation dismissed",
+        saving: "Manual schedule active",
+        icon: XCircle,
+        color: "text-muted",
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleAutomate = () => {
+    setRecommendationStatus("automated");
+    setApplianceStates((p) => ({ ...p, pump: false, ac: true }));
+    if (!phantomKilled) {
+      killPhantom();
+    }
+    const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    setDecisionTimeline((prev) => [
+      {
+        time: now,
+        text: "Autonomous AI optimization active (Pump shifted + Phantom eliminated)",
+        saving: "Rs. 1,530/month saved",
+        icon: Brain,
+        color: "text-orange-electric",
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleResetRecommendation = () => {
+    setRecommendationStatus("pending");
+  };
 
   const killPhantom = async () => {
     setKilling(true);
@@ -199,13 +255,79 @@ export default function AIAgentPage() {
               <p className="text-green-savings font-mono-num font-medium mt-3">Estimated saving: Rs. 480/month</p>
             </div>
 
-            <div className="flex gap-3">
-              <button className="btn-primary text-sm py-2 px-5">Accept</button>
-              <button className="btn-secondary text-sm py-2 px-5">Reject</button>
-              <button className="text-sm py-2 px-5 rounded-btn bg-orange-electric/15 text-orange-electric border border-orange-electric/30 font-medium hover:bg-orange-electric/25 transition-colors">
-                Automate
-              </button>
-            </div>
+            {recommendationStatus === "pending" ? (
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={handleAccept}
+                  className="btn-primary text-sm py-2 px-5 inline-flex items-center gap-1.5"
+                >
+                  <CheckCircle size={15} /> Accept
+                </button>
+                <button
+                  onClick={handleReject}
+                  className="btn-secondary text-sm py-2 px-5 inline-flex items-center gap-1.5"
+                >
+                  <XCircle size={15} /> Reject
+                </button>
+                <button
+                  onClick={handleAutomate}
+                  className="text-sm py-2 px-5 rounded-btn bg-orange-electric/15 text-orange-electric border border-orange-electric/30 font-medium hover:bg-orange-electric/25 transition-all inline-flex items-center gap-1.5 shadow-[0_0_15px_rgba(255,138,0,0.15)]"
+                >
+                  <Sparkles size={14} /> Automate
+                </button>
+              </div>
+            ) : recommendationStatus === "accepted" ? (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-card bg-green-savings/10 border border-green-savings/25"
+              >
+                <div className="flex items-center gap-2 text-sm text-green-savings font-medium">
+                  <CheckCircle size={16} />
+                  <span>Recommendation accepted — Water pump shifted to off-peak 10:42 PM</span>
+                </div>
+                <button
+                  onClick={handleResetRecommendation}
+                  className="text-xs px-3 py-1 rounded-btn bg-white/5 text-muted hover:text-main transition-colors inline-flex items-center gap-1"
+                >
+                  <RotateCcw size={11} /> Reset
+                </button>
+              </motion.div>
+            ) : recommendationStatus === "rejected" ? (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-card bg-white/5 border border-white/10"
+              >
+                <div className="flex items-center gap-2 text-sm text-muted">
+                  <XCircle size={16} className="text-danger" />
+                  <span>Recommendation dismissed — Manual control active</span>
+                </div>
+                <button
+                  onClick={handleResetRecommendation}
+                  className="text-xs px-3 py-1 rounded-btn bg-white/5 text-muted hover:text-main transition-colors inline-flex items-center gap-1"
+                >
+                  <RotateCcw size={11} /> Re-evaluate
+                </button>
+              </motion.div>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-card bg-orange-electric/10 border border-orange-electric/30 glow-orange"
+              >
+                <div className="flex items-center gap-2 text-sm text-orange-electric font-semibold">
+                  <Brain size={16} className="animate-pulse" />
+                  <span>Autonomous AI Agent Active — Auto-optimizing peak tariff & phantom load</span>
+                </div>
+                <button
+                  onClick={handleResetRecommendation}
+                  className="text-xs px-3 py-1 rounded-btn bg-orange-electric/20 text-orange-electric hover:bg-orange-electric/30 transition-colors inline-flex items-center gap-1"
+                >
+                  <RotateCcw size={11} /> Pause Auto
+                </button>
+              </motion.div>
+            )}
           </motion.div>
 
           {/* AI Reasoning Chips */}
@@ -488,7 +610,7 @@ export default function AIAgentPage() {
               {/* Vertical line */}
               <div className="absolute left-4 top-4 bottom-4 w-px bg-gradient-to-b from-orange-electric/50 via-orange-electric/20 to-transparent" />
               <div className="space-y-5">
-                {decisions.map((d, i) => (
+                {decisionTimeline.map((d, i) => (
                   <motion.div
                     key={i}
                     initial={{ opacity: 0, x: -12 }}

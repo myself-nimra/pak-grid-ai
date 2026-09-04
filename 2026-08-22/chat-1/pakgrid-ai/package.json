@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "node server.js"
+    "postbuild": "node postbuild.js",
+    "start": "node .next/standalone/server.js"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",

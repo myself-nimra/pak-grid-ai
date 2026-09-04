@@ -77,85 +77,78 @@ export async function POST(request: Request) {
 
     // Check for SMTP credentials in environment variables or request body
     const smtpHost = process.env.SMTP_HOST || "smtp.gmail.com";
-    const smtpPort = Number(process.env.SMTP_PORT) || 587;
-    const smtpUser = (senderEmail || process.env.SMTP_USER || process.env.GMAIL_USER || "").trim();
-    const smtpPass = (appPassword || process.env.SMTP_PASS || process.env.GMAIL_PASS || process.env.GMAIL_APP_PASSWORD || "").replace(/\s+/g, "");
+    const smtpPort = Number(process.env.SMTP_PORT) || 465;
+    const smtpUser = (
+      senderEmail ||
+      process.env.SMTP_USERNAME ||
+      process.env.SMTP_USER ||
+      process.env.GMAIL_USER ||
+      ""
+    ).trim();
+    const smtpPass = (
+      appPassword ||
+      process.env.SMTP_PASSWORD ||
+      process.env.SMTP_PASS ||
+      process.env.GMAIL_APP_PASSWORD ||
+      process.env.GMAIL_PASS ||
+      ""
+    ).replace(/\s+/g, "");
 
-    const isPlaceholder = !smtpUser || smtpUser === "your_email@gmail.com" || !smtpPass || smtpPass === "your_16_character_app_password";
+    const isPlaceholder =
+      !smtpUser ||
+      smtpUser === "your_email@gmail.com" ||
+      !smtpPass ||
+      smtpPass === "your_16_character_app_password";
 
-    if (!isPlaceholder) {
-      try {
-        const transporter = nodemailer.createTransport({
-          host: smtpHost,
-          port: smtpPort,
-          secure: smtpPort === 465,
-          auth: { user: smtpUser, pass: smtpPass },
-        });
-
-        const info = await transporter.sendMail({
-          from: `"PakGrid AI Security" <${smtpUser}>`,
-          to: recipientEmail,
-          replyTo: smtpUser,
-          subject: emailSubject,
-          text: textContent,
-          html: htmlContent,
-          headers: {
-            "X-Priority": "1 (Highest)",
-            "X-MSMail-Priority": "High",
-            "Importance": "High",
-            "X-Mailer": "PakGrid AI Security Mailer 1.0",
-          },
-        });
-
-        emailSent = true;
-        deliveryInfo = `Direct SMTP delivery to ${recipientEmail} successful`;
-        console.log(`[PakGrid Direct SMTP Success] Sent OTP to ${recipientEmail} via ${smtpUser}. MessageID: ${info.messageId}`);
-      } catch (smtpErr: any) {
-        console.warn("[PakGrid Direct SMTP Error] Falling back to automated test mailer:", smtpErr?.message);
-      }
+    if (isPlaceholder) {
+      console.warn("[PakGrid SMTP Error] SMTP credentials are not configured in .env");
+      return NextResponse.json(
+        { error: "SMTP credentials are not configured in .env. Please set them up." },
+        { status: 500 }
+      );
     }
 
-    // Automated Ethereal SMTP Fallback (Guaranteed to deliver seamlessly without user configuration)
-    if (!emailSent) {
-      try {
-        const testAccount = await nodemailer.createTestAccount();
-        const testTransporter = nodemailer.createTransport({
-          host: testAccount.smtp.host,
-          port: testAccount.smtp.port,
-          secure: testAccount.smtp.secure,
-          auth: {
-            user: testAccount.user,
-            pass: testAccount.pass,
-          },
-        });
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: { user: smtpUser, pass: smtpPass },
+      });
 
-        const info = await testTransporter.sendMail({
-          from: `"PakGrid AI Security" <${testAccount.user}>`,
-          to: recipientEmail,
-          replyTo: testAccount.user,
-          subject: emailSubject,
-          text: textContent,
-          html: htmlContent,
-        });
+      const info = await transporter.sendMail({
+        from: `"PakGrid AI Security" <${smtpUser}>`,
+        to: recipientEmail,
+        replyTo: smtpUser,
+        subject: emailSubject,
+        text: textContent,
+        html: htmlContent,
+        headers: {
+          "X-Priority": "1 (Highest)",
+          "X-MSMail-Priority": "High",
+          "Importance": "High",
+          "X-Mailer": "PakGrid AI Security Mailer 1.0",
+        },
+      });
 
-        emailSent = true;
-        const testUrl = nodemailer.getTestMessageUrl(info);
-        if (typeof testUrl === "string") previewUrl = testUrl;
-        deliveryInfo = `Delivered via test SMTP to ${recipientEmail}`;
-        console.log(`[PakGrid Test Mailer Success] Sent OTP to ${recipientEmail}. Preview URL: ${previewUrl}`);
-      } catch (etherealErr: any) {
-        console.warn("[PakGrid Test Mailer Error]:", etherealErr?.message);
-      }
+      emailSent = true;
+      deliveryInfo = `Direct SMTP delivery to ${recipientEmail} successful`;
+      console.log(`[PakGrid Direct SMTP Success] Sent OTP to ${recipientEmail} via ${smtpUser}. MessageID: ${info.messageId}`);
+      
+      return NextResponse.json({
+        success: true,
+        delivered: emailSent,
+        info: deliveryInfo,
+        recipient: recipientEmail,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (smtpErr: any) {
+      console.error("[PakGrid Direct SMTP Error] SMTP email failed to send:", smtpErr?.message);
+      return NextResponse.json(
+        { error: `SMTP Error: ${smtpErr?.message || "Failed to send email"}` },
+        { status: 500 }
+      );
     }
-
-    return NextResponse.json({
-      success: true,
-      delivered: emailSent,
-      info: deliveryInfo || `Verification code dispatched to ${recipientEmail}`,
-      recipient: recipientEmail,
-      previewUrl: previewUrl,
-      timestamp: new Date().toISOString(),
-    });
   } catch (error: any) {
     console.error("[OTP Send Error]:", error);
     return NextResponse.json(

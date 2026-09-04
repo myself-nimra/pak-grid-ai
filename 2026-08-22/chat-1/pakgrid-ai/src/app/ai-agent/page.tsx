@@ -3,7 +3,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Brain, Zap, Snowflake, Tv, Droplets, Wind, Refrigerator, Ghost,
-  CheckCircle, Clock, Power, Sparkles, TrendingDown
+  CheckCircle, XCircle, RotateCcw, Clock, Power, Sparkles, TrendingDown, MessageSquare, Loader2, Send
 } from "lucide-react";
 
 const appliances = [
@@ -38,7 +38,69 @@ export default function AIAgentPage() {
   const [applianceStates, setApplianceStates] = useState<Record<string, boolean>>({
     ac: true, fridge: true, fan: true, tv: true, pump: false,
   });
-  const [recommendationStatus, setRecommendationStatus] = useState<"pending" | "accepted" | "rejected">("pending");
+
+  // AI API integration state
+  const [aiAnalysis, setAiAnalysis] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [userQuestion, setUserQuestion] = useState("");
+  const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
+  const [recommendationStatus, setRecommendationStatus] = useState<"pending" | "accepted" | "rejected" | "automated">("pending");
+  const [decisionTimeline, setDecisionTimeline] = useState(decisions);
+
+  const handleAccept = () => {
+    setRecommendationStatus("accepted");
+    setApplianceStates((p) => ({ ...p, pump: false }));
+    const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    setDecisionTimeline((prev) => [
+      {
+        time: now,
+        text: "Water pump shifted to 10:42 PM (Accepted by User)",
+        saving: "Rs. 480/month saved",
+        icon: Droplets,
+        color: "text-green-savings",
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleReject = () => {
+    setRecommendationStatus("rejected");
+    const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    setDecisionTimeline((prev) => [
+      {
+        time: now,
+        text: "Water pump recommendation dismissed",
+        saving: "Manual schedule active",
+        icon: XCircle,
+        color: "text-muted",
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleAutomate = () => {
+    setRecommendationStatus("automated");
+    setApplianceStates((p) => ({ ...p, pump: false, ac: true }));
+    if (!phantomKilled) {
+      killPhantom();
+    }
+    const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    setDecisionTimeline((prev) => [
+      {
+        time: now,
+        text: "Autonomous AI optimization active (Pump shifted + Phantom eliminated)",
+        saving: "Rs. 1,530/month saved",
+        icon: Brain,
+        color: "text-orange-electric",
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleResetRecommendation = () => {
+    setRecommendationStatus("pending");
+  };
 
   const killPhantom = async () => {
     setKilling(true);
@@ -56,6 +118,64 @@ export default function AIAgentPage() {
   };
 
   const totalSavings = appliances.reduce((s, a) => s + a.saving, 0);
+
+  /** Trigger AI-powered energy analysis via the backend Qwen API */
+  const analyzeEnergy = async () => {
+    setAiLoading(true);
+    setAiError("");
+    const context = appliances
+      .map((a) => `${a.name}: ${a.watts}W, Status: ${applianceStates[a.id] ? "ON" : "OFF"}, Mode: ${a.mode}, Priority: ${a.priority}, Daily cost: Rs. ${a.cost}`)
+      .join("\n");
+    try {
+      const res = await fetch("/api/ai-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message:
+            "Analyze the current energy usage of this Pakistani home and provide 3-4 actionable recommendations to reduce the electricity bill. Mention specific appliances, time windows, and PKR savings.",
+          applianceContext: context,
+          history: chatMessages,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.details || "API request failed");
+      setAiAnalysis(data.content);
+      setChatMessages((p) => [
+        ...p,
+        { role: "user", content: "Analyze current energy usage and provide recommendations." },
+        { role: "assistant", content: data.content },
+      ]);
+    } catch (err: unknown) {
+      setAiError(err instanceof Error ? err.message : "Failed to connect to AI service");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  /** Send a follow-up question to the AI */
+  const askFollowUp = async () => {
+    if (!userQuestion.trim() || aiLoading) return;
+    const q = userQuestion.trim();
+    setUserQuestion("");
+    setChatMessages((p) => [...p, { role: "user", content: q }]);
+    setAiLoading(true);
+    setAiError("");
+    try {
+      const res = await fetch("/api/ai-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: q, history: chatMessages }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.details || "API request failed");
+      setAiAnalysis(data.content);
+      setChatMessages((p) => [...p, { role: "assistant", content: data.content }]);
+    } catch (err: unknown) {
+      setAiError(err instanceof Error ? err.message : "Failed to connect to AI service");
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   return (
     <div className="pt-20 pb-16 px-4 max-w-7xl mx-auto">
@@ -136,20 +256,77 @@ export default function AIAgentPage() {
             </div>
 
             {recommendationStatus === "pending" ? (
-              <div className="flex gap-3">
-                <button onClick={() => setRecommendationStatus("accepted")} className="btn-primary text-sm py-2 px-5">Accept</button>
-                <button onClick={() => setRecommendationStatus("rejected")} className="btn-secondary text-sm py-2 px-5">Reject</button>
-                <button className="text-sm py-2 px-5 rounded-btn bg-orange-electric/15 text-orange-electric border border-orange-electric/30 font-medium hover:bg-orange-electric/25 transition-colors">
-                  Automate
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={handleAccept}
+                  className="btn-primary text-sm py-2 px-5 inline-flex items-center gap-1.5"
+                >
+                  <CheckCircle size={15} /> Accept
+                </button>
+                <button
+                  onClick={handleReject}
+                  className="btn-secondary text-sm py-2 px-5 inline-flex items-center gap-1.5"
+                >
+                  <XCircle size={15} /> Reject
+                </button>
+                <button
+                  onClick={handleAutomate}
+                  className="text-sm py-2 px-5 rounded-btn bg-orange-electric/15 text-orange-electric border border-orange-electric/30 font-medium hover:bg-orange-electric/25 transition-all inline-flex items-center gap-1.5 shadow-[0_0_15px_rgba(255,138,0,0.15)]"
+                >
+                  <Sparkles size={14} /> Automate
                 </button>
               </div>
+            ) : recommendationStatus === "accepted" ? (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-card bg-green-savings/10 border border-green-savings/25"
+              >
+                <div className="flex items-center gap-2 text-sm text-green-savings font-medium">
+                  <CheckCircle size={16} />
+                  <span>Recommendation accepted — Water pump shifted to off-peak 10:42 PM</span>
+                </div>
+                <button
+                  onClick={handleResetRecommendation}
+                  className="text-xs px-3 py-1 rounded-btn bg-white/5 text-muted hover:text-main transition-colors inline-flex items-center gap-1"
+                >
+                  <RotateCcw size={11} /> Reset
+                </button>
+              </motion.div>
+            ) : recommendationStatus === "rejected" ? (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-card bg-white/5 border border-white/10"
+              >
+                <div className="flex items-center gap-2 text-sm text-muted">
+                  <XCircle size={16} className="text-danger" />
+                  <span>Recommendation dismissed — Manual control active</span>
+                </div>
+                <button
+                  onClick={handleResetRecommendation}
+                  className="text-xs px-3 py-1 rounded-btn bg-white/5 text-muted hover:text-main transition-colors inline-flex items-center gap-1"
+                >
+                  <RotateCcw size={11} /> Re-evaluate
+                </button>
+              </motion.div>
             ) : (
-              <div className="flex items-center gap-2 text-sm">
-                <CheckCircle size={16} className={recommendationStatus === "accepted" ? "text-green-savings" : "text-muted"} />
-                <span className={recommendationStatus === "accepted" ? "text-green-savings" : "text-muted"}>
-                  Recommendation {recommendationStatus}
-                </span>
-              </div>
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-card bg-orange-electric/10 border border-orange-electric/30 glow-orange"
+              >
+                <div className="flex items-center gap-2 text-sm text-orange-electric font-semibold">
+                  <Brain size={16} className="animate-pulse" />
+                  <span>Autonomous AI Agent Active — Auto-optimizing peak tariff & phantom load</span>
+                </div>
+                <button
+                  onClick={handleResetRecommendation}
+                  className="text-xs px-3 py-1 rounded-btn bg-orange-electric/20 text-orange-electric hover:bg-orange-electric/30 transition-colors inline-flex items-center gap-1"
+                >
+                  <RotateCcw size={11} /> Pause Auto
+                </button>
+              </motion.div>
             )}
           </motion.div>
 
@@ -173,6 +350,119 @@ export default function AIAgentPage() {
                 </motion.span>
               ))}
             </div>
+          </div>
+
+          {/* ── AI-POWERED ANALYSIS (Qwen via Alibaba Cloud) ── */}
+          <div className="glass-card p-5 border-ai/20">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-heading font-semibold flex items-center gap-2">
+                <MessageSquare size={18} className="text-ai" />
+                AI-Powered Analysis
+              </h3>
+              <span className="chip text-[10px]">
+                <Sparkles size={9} /> Powered by Qwen
+              </span>
+            </div>
+
+            {/* Trigger buttons */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              <button
+                onClick={analyzeEnergy}
+                disabled={aiLoading}
+                className="btn-primary text-xs py-2 px-4 inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {aiLoading ? (
+                  <><Loader2 size={13} className="animate-spin" /> Analyzing...</>
+                ) : (
+                  <><Brain size={13} /> Analyze with AI</>
+                )}
+              </button>
+            </div>
+
+            {/* Error */}
+            {aiError && (
+              <div className="mb-4 p-3 rounded-card bg-danger/10 border border-danger/30 text-danger text-xs flex items-start gap-2">
+                <Zap size={13} className="shrink-0 mt-0.5" />
+                <span>{aiError}</span>
+              </div>
+            )}
+
+            {/* Quick ask buttons */}
+            <div className="flex flex-wrap gap-2 mb-3">
+              {[
+                "How can I reduce AC costs during peak hours?",
+                "What appliances waste the most standby power?",
+                "Best time to run the water pump?",
+              ].map((q) => (
+                <button
+                  key={q}
+                  onClick={() => { setUserQuestion(q); }}
+                  disabled={aiLoading}
+                  className="text-[11px] px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-muted hover:text-orange-electric hover:border-orange-electric/30 transition-colors disabled:opacity-40"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+
+            {/* Input */}
+            <div className="flex gap-2 mb-4">
+              <input
+                type="text"
+                value={userQuestion}
+                onChange={(e) => setUserQuestion(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && askFollowUp()}
+                placeholder="Ask PakGrid AI anything about energy optimization..."
+                className="input-field text-xs flex-1"
+                disabled={aiLoading}
+              />
+              <button
+                onClick={askFollowUp}
+                disabled={aiLoading || !userQuestion.trim()}
+                className="btn-primary text-xs py-2 px-4 inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                aria-label="Send question"
+              >
+                {aiLoading ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+              </button>
+            </div>
+
+            {/* AI Response */}
+            {aiAnalysis && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-bg-surface rounded-card p-4 border border-ai/20"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Brain size={14} className="text-ai" />
+                  <span className="text-xs font-semibold text-ai">PakGrid AI Response</span>
+                </div>
+                <div className="text-sm text-main/90 leading-relaxed whitespace-pre-wrap">
+                  {aiAnalysis}
+                </div>
+              </motion.div>
+            )}
+
+            {/* Chat history */}
+            {chatMessages.filter((m) => m.role === "user").length > 1 && (
+              <div className="mt-3 border-t border-white/5 pt-3">
+                <p className="text-[10px] text-muted mb-2">
+                  Conversation history ({chatMessages.filter((m) => m.role === "user").length} messages)
+                </p>
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                  {chatMessages.slice(0, -2).map((msg, i) => (
+                    <div key={i} className={`text-xs p-2 rounded-btn ${
+                      msg.role === "user" ? "bg-orange-electric/10 text-orange-electric" : "bg-white/5 text-muted"
+                    }`}>
+                      <span className="font-semibold text-[10px] block mb-0.5">
+                        {msg.role === "user" ? "You" : "PakGrid AI"}
+                      </span>
+                      {msg.content.slice(0, 120)}{msg.content.length > 120 ? "..." : ""}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Appliance Control */}
@@ -320,7 +610,7 @@ export default function AIAgentPage() {
               {/* Vertical line */}
               <div className="absolute left-4 top-4 bottom-4 w-px bg-gradient-to-b from-orange-electric/50 via-orange-electric/20 to-transparent" />
               <div className="space-y-5">
-                {decisions.map((d, i) => (
+                {decisionTimeline.map((d, i) => (
                   <motion.div
                     key={i}
                     initial={{ opacity: 0, x: -12 }}

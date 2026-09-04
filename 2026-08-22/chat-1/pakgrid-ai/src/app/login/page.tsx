@@ -244,13 +244,13 @@ export default function LoginPage() {
         setMode("verify_otp");
         showToastNotification(`📬 Verification code sent to ${targetEmail}! Please check your email inbox.`, "success");
       } else {
-        setMode("verify_otp");
-        showToastNotification(`📬 Verification code sent to ${targetEmail}! Please check your email inbox.`, "info");
+        setErrorMsg(data.error || "Failed to send email. Please check SMTP configuration.");
+        showToastNotification(data.error || "Failed to send email.", "error");
       }
     } catch (e: any) {
       setSendingEmail(false);
-      setMode("verify_otp");
-      showToastNotification(`📬 Verification code sent to ${targetEmail}! Please check your email inbox.`, "info");
+      setErrorMsg("Network error or server unreachable while sending email.");
+      showToastNotification("Failed to send email.", "error");
     }
   };
 

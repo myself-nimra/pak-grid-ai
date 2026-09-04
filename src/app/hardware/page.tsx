@@ -226,8 +226,8 @@ export default function HardwarePage() {
           { label: "Hardware Cost", status: "PKR 7,500 Total", icon: DollarSign, color: "ai" },
         ].map((s) => (
           <div key={s.label} className="glass-card p-3.5 flex items-center gap-3 hover-lift">
-            <div className={`w-9 h-9 rounded-xl bg-${s.color}/10 flex items-center justify-center shrink-0`}>
-              <s.icon size={16} className={`text-${s.color}`} />
+            <div className={`w-9 h-9 rounded-xl ${s.color === "green-savings" ? "bg-green-savings/10 text-green-savings" : s.color === "warning" ? "bg-warning/10 text-warning" : "bg-ai/10 text-ai"} flex items-center justify-center shrink-0`}>
+              <s.icon size={16} />
             </div>
             <div className="min-w-0">
               <p className="text-[10px] text-muted truncate">{s.label}</p>

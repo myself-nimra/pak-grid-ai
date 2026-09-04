@@ -6,6 +6,7 @@ import {
   Battery, Sun, Home, Play, RotateCcw, Gauge, Shield, Clock, Cpu, Sparkles
 } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
+import WalkthroughTour from "@/components/WalkthroughTour";
 
 const chartData = [
   { time: "6AM",  actual: 1.2, optimized: 1.2 },
@@ -259,11 +260,22 @@ export default function DashboardPage() {
           <button onClick={resetDemo} className="btn-secondary inline-flex items-center gap-2 px-4" title="Reset">
             <RotateCcw size={15} />
           </button>
+          <button
+            onClick={() => {
+              try { localStorage.removeItem("pakgrid_tour_done"); } catch { /* ignore */ }
+              const fn = (window as unknown as Record<string, unknown>).__pakgridStartTour;
+              if (typeof fn === "function") fn();
+            }}
+            className="btn-secondary inline-flex items-center gap-2 px-4 text-xs"
+            title="Replay guided tour"
+          >
+            <Sparkles size={13} /> Tour
+          </button>
         </div>
       </div>
 
       {/* Scenario Selector */}
-      <div className="grid md:grid-cols-3 gap-3 mb-8">
+      <div data-tour="scenarios" className="grid md:grid-cols-3 gap-3 mb-8">
         {scenarios.map((item) => (
           <button
             key={item.id}
@@ -301,7 +313,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div data-tour="metrics" className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <MetricCard icon={Zap}       label="Current Load"   value={`${load.toFixed(1)} kW`}              color={loadColor}       bg={loadBg} alert={demoStep === 1} />
         <MetricCard icon={Gauge}     label="AI Autonomy"    value={`${automationScore}%`}                color="text-ai"         sub={`${scenario.city} profile`} />
         <MetricCard icon={TrendingDown} label="Today's Saving" value={`Rs. ${savedToday.toLocaleString()}`} color="text-green-savings" glow={savedToday > 0} />
@@ -313,7 +325,7 @@ export default function DashboardPage() {
         <div className="lg:col-span-2 space-y-6">
 
           {/* Consumption Chart */}
-          <div className="glass-card p-5">
+          <div data-tour="chart" className="glass-card p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-heading font-semibold">Actual vs AI Optimized</h3>
               <div className="flex gap-2 text-xs">
@@ -433,7 +445,7 @@ export default function DashboardPage() {
         <div className="space-y-5">
 
           {/* AI Status */}
-          <div className={`glass-card p-5 transition-all duration-300 ${running ? "border-orange-electric/50 glow-orange" : ""} ${running ? "agent-scan" : ""}`}>
+          <div data-tour="ai-status" className={`glass-card p-5 transition-all duration-300 ${running ? "border-orange-electric/50 glow-orange" : ""} ${running ? "agent-scan" : ""}`}>
             <div className="flex items-center gap-3 mb-3">
               <motion.div
                 className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-electric to-orange-deep flex items-center justify-center"
@@ -488,7 +500,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Autopilot Stack */}
-          <div className={`glass-card p-5 ${running ? "agent-scan" : ""}`}>
+          <div data-tour="autopilot" className={`glass-card p-5 ${running ? "agent-scan" : ""}`}>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <Cpu size={14} className="text-orange-electric" />
@@ -567,7 +579,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Live Alerts */}
-          <div className="glass-card p-4">
+          <div data-tour="alerts" className="glass-card p-4">
             <div className="flex items-center gap-2 mb-3">
               <span className="live-dot" />
               <h3 className="font-heading text-sm font-semibold">Live Alerts</h3>
@@ -597,6 +609,9 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Guided walkthrough overlay */}
+      <WalkthroughTour />
     </div>
   );
 }

@@ -244,13 +244,13 @@ export default function LoginPage() {
         setMode("verify_otp");
         showToastNotification(`📬 Verification code sent to ${targetEmail}! Please check your email inbox.`, "success");
       } else {
-        setMode("verify_otp");
-        showToastNotification(`📬 Verification code sent to ${targetEmail}! Please check your email inbox.`, "info");
+        setErrorMsg(data.error || "Failed to send email. Please check SMTP configuration.");
+        showToastNotification(data.error || "Failed to send email.", "error");
       }
     } catch (e: any) {
       setSendingEmail(false);
-      setMode("verify_otp");
-      showToastNotification(`📬 Verification code sent to ${targetEmail}! Please check your email inbox.`, "info");
+      setErrorMsg("Network error or server unreachable while sending email.");
+      showToastNotification("Failed to send email.", "error");
     }
   };
 
@@ -550,8 +550,8 @@ export default function LoginPage() {
               <div className="font-mono-num font-bold text-green-savings text-base">Up to 50%</div>
             </div>
             <div className="glass-card p-3 text-center">
-              <div className="text-xs text-muted">Edge Hardware Kit</div>
-              <div className="font-mono-num font-bold text-orange-electric text-base">Rs. 7,500 ESP32</div>
+              <div className="text-xs text-muted">Edge Microchip</div>
+              <div className="font-mono-num font-bold text-orange-electric text-base">Rs. 7-8K ESP32</div>
             </div>
           </div>
         </div>
