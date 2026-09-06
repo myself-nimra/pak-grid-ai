@@ -61,6 +61,9 @@ export default function HardwarePage() {
   const [espConnecting, setEspConnecting] = useState(false);
   const [espError, setEspError] = useState("");
   const espPortRef = useRef<SerialPort | null>(null);
+  const writerRef = useRef<WritableStreamDefaultWriter<Uint8Array> | null>(null);
+  const [relaySending, setRelaySending] = useState(false);
+  const [optimisticRelay, setOptimisticRelay] = useState<{ relay_1?: boolean; relay_2?: boolean } | null>(null);
 
   // Simulate live hardware metrics in demo mode
   useEffect(() => {
@@ -89,6 +92,10 @@ export default function HardwarePage() {
       const port = await navigator.serial.requestPort();
       await port.open({ baudRate: 115200 });
       espPortRef.current = port;
+      // Keep a writer reference for sending commands
+      if (port.writable) {
+        writerRef.current = port.writable.getWriter();
+      }
       setEspConnected(true);
       setMode("hardware");
       readEsp32Loop(port);
@@ -104,13 +111,42 @@ export default function HardwarePage() {
   const disconnectEsp32 = async () => {
     if (espPortRef.current) {
       try {
+        if (writerRef.current) {
+          try { writerRef.current.releaseLock(); } catch { /* ignore */ }
+          writerRef.current = null;
+        }
         await espPortRef.current.close();
       } catch { /* ignore */ }
       espPortRef.current = null;
     }
     setEspConnected(false);
     setEspData(null);
+    setOptimisticRelay(null);
     setMode("demo");
+  };
+
+  /* ── Send relay command to ESP32 ── */
+  const sendRelayCommand = async (relay: "relay_1" | "relay_2", newState: boolean) => {
+    if (!writerRef.current || relaySending) return;
+    // Optimistic update — toggle UI immediately
+    setOptimisticRelay((prev) => ({ ...prev, [relay]: newState }));
+    setRelaySending(true);
+    try {
+      const cmd = JSON.stringify({ [relay]: newState }) + "\n";
+      const encoder = new TextEncoder();
+      await writerRef.current.write(encoder.encode(cmd));
+      // Add to console log
+      setLogs((prev) => [
+        ...prev,
+        { time: new Date().toLocaleTimeString("en-GB", { hour12: false }), text: `Relay command sent: ${relay}=${newState ? "ON" : "OFF"}`, type: "success" as const },
+      ]);
+    } catch {
+      // Revert optimistic update on failure
+      setOptimisticRelay((prev) => ({ ...prev, [relay]: !newState }));
+      setEspError(`Failed to send ${relay} command`);
+    } finally {
+      setRelaySending(false);
+    }
   };
 
   const readEsp32Loop = async (port: SerialPort) => {
@@ -159,6 +195,10 @@ export default function HardwarePage() {
     return () => {
       if (espPortRef.current) {
         try {
+          if (writerRef.current) {
+            try { writerRef.current.releaseLock(); } catch { /* ignore */ }
+            writerRef.current = null;
+          }
           espPortRef.current.close();
         } catch { /* ignore */ }
       }
@@ -315,14 +355,31 @@ export default function HardwarePage() {
               />
             </div>
 
-            {/* Relay Status */}
-            <div className="mt-4 bg-bg-surface rounded-card p-3.5 border border-white/5 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs text-muted font-medium">Relay Channels</span>
+            {/* Relay Status & Control */}
+            <div data-tour="relays" className="mt-4 bg-bg-surface rounded-card p-3.5 border border-white/5">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <span className="text-xs text-muted font-medium">Relay Channels</span>
+                {espConnected && (
+                  <span className="text-[9px] text-warning bg-warning/10 px-2 py-0.5 rounded-full">
+                    Max load: 230W (1A wiring limit)
+                  </span>
+                )}
+              </div>
               <div className="flex flex-wrap gap-2">
                 {mode === "hardware" && espData ? (
                   <>
-                    <RelayBadge label="Relay 1" active={espData.relay_1} />
-                    <RelayBadge label="Relay 2" active={espData.relay_2} />
+                    <RelayToggle
+                      label="Relay 1 (Pump)"
+                      active={optimisticRelay?.relay_1 ?? espData.relay_1}
+                      disabled={relaySending || !espConnected}
+                      onToggle={(v) => sendRelayCommand("relay_1", v)}
+                    />
+                    <RelayToggle
+                      label="Relay 2 (Solar)"
+                      active={optimisticRelay?.relay_2 ?? espData.relay_2}
+                      disabled={relaySending || !espConnected}
+                      onToggle={(v) => sendRelayCommand("relay_2", v)}
+                    />
                   </>
                 ) : (
                   <>
@@ -461,15 +518,19 @@ function SensorCard({ label, value, unit, highlight, live }: { label: string; va
   );
 }
 
-function RelayBadge({ label, active }: { label: string; active: boolean }) {
+function RelayToggle({ label, active, disabled, onToggle }: { label: string; active: boolean; disabled?: boolean; onToggle: (v: boolean) => void }) {
   return (
-    <div className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-full border ${
-      active
-        ? "bg-green-savings/10 text-green-savings border-green-savings/30"
-        : "bg-white/5 text-muted border-white/10"
-    }`}>
+    <button
+      onClick={() => onToggle(!active)}
+      disabled={disabled}
+      className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-full border transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+        active
+          ? "bg-green-savings/10 text-green-savings border-green-savings/30 hover:bg-green-savings/20"
+          : "bg-white/5 text-muted border-white/10 hover:bg-white/10"
+      }`}
+    >
       <span className={`w-2 h-2 rounded-full ${active ? "bg-green-savings animate-pulse" : "bg-muted/40"}`} />
       {label}: {active ? "ON" : "OFF"}
-    </div>
+    </button>
   );
 }

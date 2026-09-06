@@ -1,0 +1,195 @@
+{
+  "model_name": "pakgrid-peak-hour",
+  "version": 1,
+  "trained_at": "2026-09-05T14:54:41+00:00",
+  "framework": "numpy (hand-implemented ridge + logistic regression)",
+  "data_source": {
+    "kind": "simulated",
+    "note": "Physically-grounded appliance-level simulator; see ml/simulate.py. Swap in logged PZEM-004T telemetry via simulate.read_csv() to retrain on real data.",
+    "rows": 5760,
+    "days": 240
+  },
+  "feature_names": [
+    "hour_sin",
+    "hour_cos",
+    "hour_sin2",
+    "hour_cos2",
+    "hour_sin3",
+    "hour_cos3",
+    "hour_sin4",
+    "hour_cos4",
+    "temp_c",
+    "cooling_demand",
+    "is_weekend",
+    "season_sin",
+    "season_cos"
+  ],
+  "ac_threshold_c": 29.0,
+  "standardizer": {
+    "mean": [
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      0.0,
+      -0.0,
+      23.394996,
+      1.562858,
+      0.28125,
+      0.600645,
+      -0.054431
+    ],
+    "std": [
+      0.707107,
+      0.707107,
+      0.707107,
+      0.707107,
+      0.707107,
+      0.707107,
+      0.707107,
+      0.707107,
+      8.86423,
+      3.045197,
+      0.449609,
+      0.339111,
+      0.721988
+    ]
+  },
+  "load_regressor": {
+    "type": "ridge",
+    "lambda": 1.0,
+    "weights": [
+      -0.103242,
+      0.038762,
+      -0.137713,
+      -0.12273,
+      -0.054539,
+      -0.037835,
+      0.031041,
+      0.055741,
+      0.064946,
+      0.300898,
+      0.056256,
+      -0.038535,
+      -0.028071
+    ],
+    "intercept": 0.647571,
+    "metrics": {
+      "train": {
+        "mae_kw": 0.2072,
+        "rmse_kw": 0.2906,
+        "r2": 0.7212
+      },
+      "test": {
+        "mae_kw": 0.2994,
+        "rmse_kw": 0.3816,
+        "r2": 0.6567
+      }
+    }
+  },
+  "peak_classifier": {
+    "type": "logistic",
+    "epochs": 8000,
+    "learning_rate": 0.35,
+    "l2": 0.001,
+    "threshold": 0.5,
+    "weights": [
+      -0.902278,
+      -0.859156,
+      -1.05636,
+      -0.933259,
+      -0.647579,
+      -0.183733,
+      0.015263,
+      0.572581,
+      0.283832,
+      0.81661,
+      0.060894,
+      0.477386,
+      1.004613
+    ],
+    "intercept": -1.223618,
+    "metrics": {
+      "train": {
+        "accuracy": 0.73,
+        "precision": 0.2878,
+        "recall": 0.7865,
+        "f1": 0.4214,
+        "confusion": {
+          "tp": 453,
+          "fp": 1121,
+          "tn": 2911,
+          "fn": 123
+        }
+      },
+      "test": {
+        "accuracy": 0.8646,
+        "precision": 0.4732,
+        "recall": 0.7361,
+        "f1": 0.5761,
+        "confusion": {
+          "tp": 106,
+          "fp": 118,
+          "tn": 890,
+          "fn": 38
+        }
+      }
+    },
+    "tariff_clock_baseline": {
+      "accuracy": 0.875,
+      "precision": 0.5,
+      "recall": 0.6667,
+      "f1": 0.5714,
+      "confusion": {
+        "tp": 96,
+        "fp": 96,
+        "tn": 912,
+        "fn": 48
+      }
+    }
+  },
+  "peak_selection": {
+    "chosen": "logistic",
+    "candidates_test_f1": {
+      "logistic": 0.5761,
+      "top_k_ranking": 0.5417,
+      "tariff_clock": 0.5714
+    },
+    "top_k_ranking": {
+      "k": 3,
+      "metrics": {
+        "train": {
+          "accuracy": 0.8559,
+          "precision": 0.4236,
+          "recall": 0.4236,
+          "f1": 0.4236,
+          "confusion": {
+            "tp": 244,
+            "fp": 332,
+            "tn": 3700,
+            "fn": 332
+          }
+        },
+        "test": {
+          "accuracy": 0.8854,
+          "precision": 0.5417,
+          "recall": 0.5417,
+          "f1": 0.5417,
+          "confusion": {
+            "tp": 78,
+            "fp": 66,
+            "tn": 942,
+            "fn": 66
+          }
+        }
+      }
+    },
+    "honest_note": "Peak-hour identification sits close to its noise ceiling on this dataset: ranking the noise-free expected load curve scores only 0.5417 F1, and a fixed 6-10 PM rule scores 0.5714. The model's material advantage over a fixed schedule is load MAGNITUDE prediction (test MAE 0.2994 kW, R2 0.6567), which a clock cannot produce."
+  },
+  "tariff_peak_window": [
+    18,
+    22
+  ]
+}

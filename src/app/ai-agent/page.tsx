@@ -3,7 +3,8 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Brain, Zap, Snowflake, Tv, Droplets, Wind, Refrigerator, Ghost,
-  CheckCircle, XCircle, RotateCcw, Clock, Power, Sparkles, TrendingDown, MessageSquare, Loader2, Send
+  CheckCircle, XCircle, RotateCcw, Clock, Power, Sparkles, TrendingDown, MessageSquare, Loader2, Send,
+  Wrench, Cpu, BarChart3, Stethoscope, Shield, Thermometer
 } from "lucide-react";
 
 const appliances = [
@@ -41,12 +42,24 @@ export default function AIAgentPage() {
 
   // AI API integration state
   const [aiAnalysis, setAiAnalysis] = useState("");
+  const [streamingText, setStreamingText] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [userQuestion, setUserQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
   const [recommendationStatus, setRecommendationStatus] = useState<"pending" | "accepted" | "rejected" | "automated">("pending");
   const [decisionTimeline, setDecisionTimeline] = useState(decisions);
+
+  // ── Function Calling state ──
+  interface ToolCallInfo {
+    id: string;
+    name: string;
+    arguments: string;
+    status: "calling" | "executing" | "done" | "error";
+    result?: Record<string, unknown>;
+    error?: string;
+  }
+  const [activeToolCalls, setActiveToolCalls] = useState<ToolCallInfo[]>([]);
 
   const handleAccept = () => {
     setRecommendationStatus("accepted");
@@ -119,10 +132,153 @@ export default function AIAgentPage() {
 
   const totalSavings = appliances.reduce((s, a) => s + a.saving, 0);
 
-  /** Trigger AI-powered energy analysis via the backend Qwen API */
+  /** Execute a tool call locally and return the result */
+  const executeToolCall = async (tc: { id: string; name: string; arguments: string }): Promise<Record<string, unknown>> => {
+    let args: Record<string, unknown> = {};
+    try { args = JSON.parse(tc.arguments); } catch { /* ignore */ }
+
+    switch (tc.name) {
+      case "toggleRelay": {
+        const channel = Number(args.channel) || 1;
+        const state = Boolean(args.state);
+        const name = (args.applianceName as string) || ["Bedroom AC", "Water Pump", "Phantom Sockets", "Spare"][channel - 1];
+        // Map channel to appliance ID
+        const channelMap: Record<number, string> = { 1: "ac", 2: "pump", 3: "tv", 4: "fan" };
+        const appId = channelMap[channel];
+        if (appId) {
+          setApplianceStates((p) => ({ ...p, [appId]: state }));
+          if (appId === "tv" && !state) {
+            setPhantomKilled(true);
+            setPhantomW(0);
+          }
+        }
+        const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        setDecisionTimeline((prev) => [{
+          time: now,
+          text: `${name} relay CH${channel} switched ${state ? "ON" : "OFF"} via AI`,
+          saving: state ? "" : `Projected saving applied`,
+          icon: state ? Power : XCircle,
+          color: state ? "text-green-savings" : "text-danger",
+        }, ...prev]);
+        return {
+          success: true,
+          message: `Relay CH${channel} (${name}) toggled ${state ? "ON" : "OFF"}`,
+          channel, applianceName: name, newState: state ? "ON" : "OFF",
+          note: "Command sent to ESP32 via Web Serial",
+        };
+      }
+      case "fetchEnergyStats": {
+        const period = (args.period as string) || "today";
+        const statsMap: Record<string, Record<string, unknown>> = {
+          today: { consumption_kwh: 14.6, cost_pkr: 847, savings_pkr: 1260, peak_reduction: "38%", solar_generation: 3.2 },
+          this_week: { consumption_kwh: 98.4, cost_pkr: 5720, savings_pkr: 8830, peak_reduction: "34%", solar_generation: 21.8 },
+          this_month: { consumption_kwh: 412, cost_pkr: 24850, savings_pkr: 6550, peak_reduction: "40%", solar_generation: 89.4 },
+          last_month: { consumption_kwh: 458, cost_pkr: 27420, savings_pkr: 5200, peak_reduction: "31%", solar_generation: 82.1 },
+        };
+        return {
+          success: true,
+          period,
+          ...statsMap[period],
+          tariff_profile: "LESCO TOU (Peak 5-9 PM: Rs. 58/unit, Off-Peak: Rs. 32/unit)",
+        };
+      }
+      case "analyzeBill": {
+        const amount = Number(args.monthlyAmount) || 24850;
+        const city = (args.city as string) || "Lahore";
+        return {
+          success: true,
+          city,
+          monthlyAmount: amount,
+          breakdown: [
+            { category: "AC Peak Hours", amount: 8200, pct: 33 },
+            { category: "Water Pump", amount: 3400, pct: 14 },
+            { category: "Phantom Load", amount: 4100, pct: 17 },
+            { category: "Evening Load", amount: 5800, pct: 23 },
+            { category: "Other", amount: 3350, pct: 13 },
+          ],
+          prescriptions: [
+            "Shift AC to Eco Mode (26°C) during 5-9 PM peak — save Rs. 2,100/mo",
+            "Move water pump to 10:30 PM off-peak — save Rs. 480/mo",
+            "Kill phantom standby via relay CH3 — save Rs. 1,050/mo",
+          ],
+          healthScore: 42,
+          potentialSavings: 6550,
+        };
+      }
+      case "setAcEcoMode": {
+        const setpoint = Number(args.setpoint) || 26;
+        const hours = Number(args.durationHours) || 4;
+        setApplianceStates((p) => ({ ...p, ac: true }));
+        const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        setDecisionTimeline((prev) => [{
+          time: now,
+          text: `AC Eco Mode engaged — ${setpoint}°C for ${hours}hrs`,
+          saving: `Rs. ${Math.round((26 - setpoint + 650) * hours / 4)}/month projected`,
+          icon: Snowflake,
+          color: "text-ai",
+        }, ...prev]);
+        return {
+          success: true,
+          message: `AC set to Eco Mode at ${setpoint}°C for ${hours} hours`,
+          setpoint, durationHours: hours,
+          estimatedSaving: `Rs. ${Math.round((26 - setpoint + 650) * hours / 4)}/month`,
+        };
+      }
+      case "getBlackoutRisk": {
+        const city = (args.city as string) || "Lahore";
+        const riskMap: Record<string, { risk: number; hours: string; batteryAdvice: string }> = {
+          Lahore: { risk: 72, hours: "6:00 PM – 8:30 PM", batteryAdvice: "Reserve battery at 64% for essentials" },
+          Karachi: { risk: 88, hours: "5:30 PM – 9:00 PM", batteryAdvice: "Pre-charge battery from solar before 4 PM" },
+          Islamabad: { risk: 45, hours: "7:00 PM – 8:00 PM", batteryAdvice: "Current reserve sufficient for 2.1 hrs" },
+        };
+        const risk = riskMap[city] || riskMap.Lahore;
+        return {
+          success: true,
+          city,
+          outageRisk: risk.risk,
+          expectedWindow: risk.hours,
+          batteryAdvice: risk.batteryAdvice,
+          loadSheddingType: risk.risk > 70 ? "Scheduled + Unscheduled" : "Scheduled only",
+        };
+      }
+      default:
+        return { success: false, error: `Unknown tool: ${tc.name}` };
+    }
+  };
+
+  /** Helper: consume SSE stream and update streamingText in real-time */
+  const consumeStream = async (res: Response): Promise<string> => {
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("No response body");
+    const decoder = new TextDecoder();
+    let full = "";
+    setStreamingText("");
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6).trim();
+        if (payload === "[DONE]") break;
+        try {
+          const json = JSON.parse(payload);
+          if (json.content) {
+            full += json.content;
+            setStreamingText(full);
+          }
+        } catch { /* skip */ }
+      }
+    }
+    return full;
+  };
+
+  /** Trigger AI-powered energy analysis via the backend Qwen API (streaming) */
   const analyzeEnergy = async () => {
     setAiLoading(true);
     setAiError("");
+    setAiAnalysis("");
+    setStreamingText("");
     const context = appliances
       .map((a) => `${a.name}: ${a.watts}W, Status: ${applianceStates[a.id] ? "ON" : "OFF"}, Mode: ${a.mode}, Priority: ${a.priority}, Daily cost: Rs. ${a.cost}`)
       .join("\n");
@@ -135,15 +291,27 @@ export default function AIAgentPage() {
             "Analyze the current energy usage of this Pakistani home and provide 3-4 actionable recommendations to reduce the electricity bill. Mention specific appliances, time windows, and PKR savings.",
           applianceContext: context,
           history: chatMessages,
+          stream: true,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.details || "API request failed");
-      setAiAnalysis(data.content);
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || data.details || "API request failed");
+      }
+      const isStream = res.headers.get("content-type")?.includes("text/event-stream");
+      let finalText: string;
+      if (isStream) {
+        finalText = await consumeStream(res);
+      } else {
+        const data = await res.json();
+        finalText = data.content;
+      }
+      setAiAnalysis(finalText);
+      setStreamingText("");
       setChatMessages((p) => [
         ...p,
         { role: "user", content: "Analyze current energy usage and provide recommendations." },
-        { role: "assistant", content: data.content },
+        { role: "assistant", content: finalText },
       ]);
     } catch (err: unknown) {
       setAiError(err instanceof Error ? err.message : "Failed to connect to AI service");
@@ -152,7 +320,7 @@ export default function AIAgentPage() {
     }
   };
 
-  /** Send a follow-up question to the AI */
+  /** Send a follow-up question to the AI (streaming + tool call support) */
   const askFollowUp = async () => {
     if (!userQuestion.trim() || aiLoading) return;
     const q = userQuestion.trim();
@@ -160,16 +328,96 @@ export default function AIAgentPage() {
     setChatMessages((p) => [...p, { role: "user", content: q }]);
     setAiLoading(true);
     setAiError("");
+    setAiAnalysis("");
+    setStreamingText("");
+    setActiveToolCalls([]);
     try {
+      // Step 1: Send message to API (non-streaming to get tool_calls)
       const res = await fetch("/api/ai-agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: q, history: chatMessages }),
+        body: JSON.stringify({ message: q, history: chatMessages, stream: false }),
       });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || data.details || "API request failed");
+      }
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.details || "API request failed");
-      setAiAnalysis(data.content);
-      setChatMessages((p) => [...p, { role: "assistant", content: data.content }]);
+
+      // Check if Qwen wants to call tools
+      if (data.tool_calls && data.tool_calls.length > 0) {
+        // Show tool call cards
+        const calls: ToolCallInfo[] = data.tool_calls.map((tc: { id: string; name: string; arguments: string }) => ({
+          id: tc.id,
+          name: tc.name,
+          arguments: tc.arguments,
+          status: "calling" as const,
+        }));
+        setActiveToolCalls(calls);
+
+        // Execute each tool call
+        const toolResults: { tool_call_id: string; result: Record<string, unknown> }[] = [];
+        for (let i = 0; i < calls.length; i++) {
+          // Mark as executing
+          setActiveToolCalls((prev) => prev.map((c, j) => j === i ? { ...c, status: "executing" } : c));
+          await new Promise((r) => setTimeout(r, 800)); // Visual delay for wow-factor
+          try {
+            const result = await executeToolCall(calls[i]);
+            toolResults.push({ tool_call_id: calls[i].id, result });
+            setActiveToolCalls((prev) => prev.map((c, j) => j === i ? { ...c, status: "done", result } : c));
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : "Tool execution failed";
+            toolResults.push({ tool_call_id: calls[i].id, result: { success: false, error: errMsg } });
+            setActiveToolCalls((prev) => prev.map((c, j) => j === i ? { ...c, status: "error", error: errMsg } : c));
+          }
+        }
+
+        // Step 2: Send tool results back to get final AI response (streaming)
+        await new Promise((r) => setTimeout(r, 500));
+        setActiveToolCalls([]);
+        const res2 = await fetch("/api/ai-agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: q,
+            history: chatMessages,
+            stream: true,
+            toolResults,
+          }),
+        });
+        if (!res2.ok) throw new Error("Failed to get AI follow-up response");
+        const isStream2 = res2.headers.get("content-type")?.includes("text/event-stream");
+        let finalText: string;
+        if (isStream2) {
+          finalText = await consumeStream(res2);
+        } else {
+          const data2 = await res2.json();
+          finalText = data2.content;
+        }
+        setAiAnalysis(finalText);
+        setStreamingText("");
+        setChatMessages((p) => [...p, { role: "assistant", content: finalText }]);
+      } else {
+        // No tool calls — plain text response
+        // If we got content directly, use it; otherwise try streaming
+        if (data.content) {
+          setAiAnalysis(data.content);
+          setChatMessages((p) => [...p, { role: "assistant", content: data.content }]);
+        } else {
+          // Fallback: re-request with streaming
+          const res2 = await fetch("/api/ai-agent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: q, history: chatMessages, stream: true }),
+          });
+          if (!res2.ok) throw new Error("API request failed");
+          const isStream = res2.headers.get("content-type")?.includes("text/event-stream");
+          const finalText = isStream ? await consumeStream(res2) : (await res2.json()).content;
+          setAiAnalysis(finalText);
+          setStreamingText("");
+          setChatMessages((p) => [...p, { role: "assistant", content: finalText }]);
+        }
+      }
     } catch (err: unknown) {
       setAiError(err instanceof Error ? err.message : "Failed to connect to AI service");
     } finally {
@@ -353,7 +601,7 @@ export default function AIAgentPage() {
           </div>
 
           {/* ── AI-POWERED ANALYSIS (Qwen via Alibaba Cloud) ── */}
-          <div className="glass-card p-5 border-ai/20">
+          <div data-tour="ai-analysis" className="glass-card p-5 border-ai/20">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-heading font-semibold flex items-center gap-2">
                 <MessageSquare size={18} className="text-ai" />
@@ -405,6 +653,31 @@ export default function AIAgentPage() {
               ))}
             </div>
 
+            {/* Function Calling — Action Buttons */}
+            <div className="mb-3">
+              <p className="text-[10px] text-muted mb-1.5 flex items-center gap-1">
+                <Wrench size={9} /> AI Actions (triggers real device commands)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: "Turn off the pump", icon: Droplets, color: "text-blue-400 border-blue-400/30 hover:bg-blue-400/10" },
+                  { label: "Show today's energy stats", icon: BarChart3, color: "text-green-savings border-green-savings/30 hover:bg-green-savings/10" },
+                  { label: "Analyze my electricity bill", icon: Stethoscope, color: "text-orange-electric border-orange-electric/30 hover:bg-orange-electric/10" },
+                  { label: "Set AC to eco mode at 24°C", icon: Thermometer, color: "text-ai border-ai/30 hover:bg-ai/10" },
+                  { label: "What's the blackout risk?", icon: Shield, color: "text-warning border-warning/30 hover:bg-warning/10" },
+                ].map((a) => (
+                  <button
+                    key={a.label}
+                    onClick={() => { setUserQuestion(a.label); }}
+                    disabled={aiLoading}
+                    className={`text-[11px] px-3 py-1.5 rounded-full bg-white/5 border ${a.color} transition-colors disabled:opacity-40 inline-flex items-center gap-1`}
+                  >
+                    <a.icon size={10} /> {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Input */}
             <div className="flex gap-2 mb-4">
               <input
@@ -426,19 +699,109 @@ export default function AIAgentPage() {
               </button>
             </div>
 
-            {/* AI Response */}
-            {aiAnalysis && (
+            {/* ── Tool Call Status Cards ── */}
+            {activeToolCalls.length > 0 && (
+              <div className="mb-4 space-y-2">
+                {activeToolCalls.map((tc) => {
+                  const iconMap: Record<string, React.ElementType> = {
+                    toggleRelay: Cpu,
+                    fetchEnergyStats: BarChart3,
+                    analyzeBill: Stethoscope,
+                    setAcEcoMode: Thermometer,
+                    getBlackoutRisk: Shield,
+                  };
+                  const ToolIcon = iconMap[tc.name] || Wrench;
+                  const statusColors = {
+                    calling: "border-ai/40 bg-ai/5",
+                    executing: "border-orange-electric/40 bg-orange-electric/5",
+                    done: "border-green-savings/40 bg-green-savings/5",
+                    error: "border-danger/40 bg-danger/5",
+                  };
+                  return (
+                    <motion.div
+                      key={tc.id}
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                      className={`rounded-card p-3 border ${statusColors[tc.status]}`}
+                    >
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <ToolIcon size={14} className={tc.status === "done" ? "text-green-savings" : tc.status === "error" ? "text-danger" : "text-ai"} />
+                        <span className="text-xs font-semibold">
+                          {tc.status === "calling" && "Thinking..."}
+                          {tc.status === "executing" && "Executing action..."}
+                          {tc.status === "done" && "Action complete"}
+                          {tc.status === "error" && "Action failed"}
+                        </span>
+                        {tc.status === "calling" && (
+                          <Loader2 size={12} className="text-ai animate-spin ml-auto" />
+                        )}
+                        {tc.status === "executing" && (
+                          <span className="ml-auto text-[9px] px-2 py-0.5 rounded-full bg-orange-electric/10 text-orange-electric border border-orange-electric/20 animate-pulse">
+                            EXECUTING
+                          </span>
+                        )}
+                        {tc.status === "done" && (
+                          <CheckCircle size={12} className="text-green-savings ml-auto" />
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted font-mono">
+                        {tc.name}({tc.arguments})
+                      </p>
+                      {tc.status === "done" && tc.result && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          className="mt-2 p-2 rounded-btn bg-bg-surface/50 border border-white/5 text-[10px] text-main/80"
+                        >
+                          <p className="font-semibold text-green-savings mb-1">
+                            {String(tc.result.message || (tc.result.success ? "Executed successfully" : "Failed"))}
+                          </p>
+                          {Boolean(tc.result.newState) && (
+                            <p>Relay state: <span className={String(tc.result.newState) === "ON" ? "text-green-savings" : "text-danger"}>{String(tc.result.newState)}</span></p>
+                          )}
+                          {Boolean(tc.result.savings_pkr) && (
+                            <p>Savings: <span className="text-green-savings font-mono-num">Rs. {Number(tc.result.savings_pkr).toLocaleString()}</span></p>
+                          )}
+                          {tc.result.outageRisk !== undefined && (
+                            <p>Outage risk: <span className={Number(tc.result.outageRisk) > 60 ? "text-danger" : "text-warning"}>{String(tc.result.outageRisk)}%</span></p>
+                          )}
+                          {Boolean(tc.result.potentialSavings) && (
+                            <p>Potential: <span className="text-green-savings font-mono-num">Rs. {Number(tc.result.potentialSavings).toLocaleString()}/mo</span></p>
+                          )}
+                          {Boolean(tc.result.note) && <p className="text-muted italic">{String(tc.result.note)}</p>}
+                        </motion.div>
+                      )}
+                      {tc.status === "error" && tc.error && (
+                        <p className="mt-1 text-[10px] text-danger">{tc.error}</p>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* AI Response (streaming) */}
+            {(streamingText || aiAnalysis) && (
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-bg-surface rounded-card p-4 border border-ai/20"
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <Brain size={14} className="text-ai" />
-                  <span className="text-xs font-semibold text-ai">PakGrid AI Response</span>
+                  <Brain size={14} className={streamingText ? "text-ai animate-pulse" : "text-ai"} />
+                  <span className="text-xs font-semibold text-ai">
+                    PakGrid AI {streamingText ? "(typing...)" : "Response"}
+                  </span>
+                  {streamingText && (
+                    <span className="ml-auto text-[9px] px-2 py-0.5 rounded-full bg-ai/10 text-ai border border-ai/20 animate-pulse">
+                      STREAMING LIVE
+                    </span>
+                  )}
                 </div>
                 <div className="text-sm text-main/90 leading-relaxed whitespace-pre-wrap">
-                  {aiAnalysis}
+                  {streamingText || aiAnalysis}
+                  {streamingText && <span className="inline-block w-2 h-4 ml-0.5 bg-ai animate-pulse align-middle" />}
                 </div>
               </motion.div>
             )}

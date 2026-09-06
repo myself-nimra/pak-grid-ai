@@ -615,7 +615,7 @@ export default function BillDoctorPage() {
       </div>
 
       {/* ── FEATURE 6: Bill Photo Upload with OCR ── */}
-      <div className="glass-card p-6 mt-6 border-orange-electric/20">
+      <div data-tour="ocr" className="glass-card p-6 mt-6 border-orange-electric/20">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-heading text-xl font-bold flex items-center gap-2">
             <FileImage className="text-orange-electric" size={20} />

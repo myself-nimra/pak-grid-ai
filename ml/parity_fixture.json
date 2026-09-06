@@ -1,0 +1,82 @@
+[
+  {
+    "hour": 3,
+    "temperature_c": 33.0,
+    "is_weekend": 0,
+    "day_of_year": 200,
+    "expected_load_kw": 0.7057845444541462,
+    "expected_peak_probability": 0.0006448347105190534
+  },
+  {
+    "hour": 8,
+    "temperature_c": 33.0,
+    "is_weekend": 0,
+    "day_of_year": 200,
+    "expected_load_kw": 1.1072427745844091,
+    "expected_peak_probability": 0.11849064871987264
+  },
+  {
+    "hour": 14,
+    "temperature_c": 33.0,
+    "is_weekend": 0,
+    "day_of_year": 200,
+    "expected_load_kw": 0.9063678808918718,
+    "expected_peak_probability": 0.072378172428245
+  },
+  {
+    "hour": 19,
+    "temperature_c": 33.0,
+    "is_weekend": 0,
+    "day_of_year": 200,
+    "expected_load_kw": 1.5241911896250406,
+    "expected_peak_probability": 0.48770951163507914
+  },
+  {
+    "hour": 21,
+    "temperature_c": 33.0,
+    "is_weekend": 0,
+    "day_of_year": 200,
+    "expected_load_kw": 1.4108569698143252,
+    "expected_peak_probability": 0.22126311604256335
+  },
+  {
+    "hour": 7,
+    "temperature_c": 14.5,
+    "is_weekend": 1,
+    "day_of_year": 20,
+    "expected_load_kw": 0.6956972235323486,
+    "expected_peak_probability": 0.7396699679571839
+  },
+  {
+    "hour": 13,
+    "temperature_c": 21.0,
+    "is_weekend": 1,
+    "day_of_year": 90,
+    "expected_load_kw": 0.4241740167008675,
+    "expected_peak_probability": 0.4785857149848156
+  },
+  {
+    "hour": 20,
+    "temperature_c": 38.5,
+    "is_weekend": 0,
+    "day_of_year": 180,
+    "expected_load_kw": 2.068828016934904,
+    "expected_peak_probability": 0.8286177333473422
+  },
+  {
+    "hour": 0,
+    "temperature_c": 27.0,
+    "is_weekend": 0,
+    "day_of_year": 300,
+    "expected_load_kw": 0.5423336492037133,
+    "expected_peak_probability": 0.006833738937371396
+  },
+  {
+    "hour": 23,
+    "temperature_c": 30.5,
+    "is_weekend": 1,
+    "day_of_year": 350,
+    "expected_load_kw": 0.8968188783908104,
+    "expected_peak_probability": 0.2518086474615039
+  }
+]

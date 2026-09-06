@@ -90,7 +90,7 @@ export default function BlackoutPage() {
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Outage Risk Circular Gauge */}
-        <div className="glass-card p-6 flex flex-col items-center justify-between hover-lift">
+        <div data-tour="risk-gauge" className="glass-card p-6 flex flex-col items-center justify-between hover-lift">
           <h3 className="font-heading font-semibold mb-2">Predicted Outage Risk</h3>
           <p className="text-muted text-xs mb-4 text-center">Based on neighborhood grid patterns & weather</p>
           

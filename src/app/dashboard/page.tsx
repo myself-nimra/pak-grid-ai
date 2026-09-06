@@ -8,7 +8,9 @@ import {
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
 import WalkthroughTour from "@/components/WalkthroughTour";
 
-const chartData = [
+// Fallback curve, used only if /api/predict-peak is unreachable. The live
+// dashboard renders output from the trained model in src/lib/ml/peak-model.json.
+const fallbackChartData = [
   { time: "6AM",  actual: 1.2, optimized: 1.2 },
   { time: "8AM",  actual: 1.8, optimized: 1.6 },
   { time: "10AM", actual: 2.1, optimized: 1.7 },
@@ -23,6 +25,38 @@ const chartData = [
   { time: "10PM", actual: 2.0, optimized: 1.5 },
   { time: "11PM", actual: 1.4, optimized: 1.2 },
 ];
+
+/** Shape returned by GET /api/predict-peak. */
+interface MlForecast {
+  model: {
+    name: string;
+    version: number;
+    trainedAt: string;
+    framework: string;
+    dataSource: { kind: string; rows: number; days: number };
+    features: number;
+    regression: { mae_kw: number; rmse_kw: number; r2: number };
+    classification: { accuracy: number; precision: number; recall: number; f1: number };
+    baselineF1: number;
+  };
+  summary: {
+    predictedPeakHours: string[];
+    peakLoadKw: number;
+    baselineKwh: number;
+    optimizedKwh: number;
+    reductionPercent: number;
+  };
+  curve: {
+    hour: number;
+    label: string;
+    temperatureC: number;
+    predictedKw: number;
+    optimizedKw: number;
+    peakProbability: number;
+    isPredictedPeak: boolean;
+    inTariffWindow: boolean;
+  }[];
+}
 
 const baseAlerts = [
   { text: "Grid stable — off-peak tariff active", type: "success" },
@@ -124,8 +158,45 @@ export default function DashboardPage() {
   const [showDecision, setShowDecision] = useState(false);
   const [scenarioId, setScenarioId] = useState<ScenarioId>("evening");
   const [activeActions, setActiveActions] = useState<string[]>([]);
+  const [forecast, setForecast] = useState<MlForecast | null>(null);
+  const [forecastError, setForecastError] = useState<string | null>(null);
   const [batteryReserve, setBatteryReserve] = useState(72);
   const [automationScore, setAutomationScore] = useState(42);
+
+  // Pull the trained peak-hour forecast. Falls back to the static curve only if
+  // the model endpoint is unreachable, and says so in the UI when it does.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/predict-peak")
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data: MlForecast) => {
+        if (!cancelled) {
+          setForecast(data);
+          setForecastError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setForecastError(err instanceof Error ? err.message : "unreachable");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Chart rows: model output when available, static curve otherwise.
+  const chartRows = forecast
+    ? forecast.curve.map((c) => ({
+        time: c.label,
+        actual: c.predictedKw,
+        optimized: c.optimizedKw,
+        peak: c.isPredictedPeak,
+      }))
+    : fallbackChartData;
 
   const scenario = scenarios.find((s) => s.id === scenarioId) || scenarios[0];
 
@@ -326,76 +397,196 @@ export default function DashboardPage() {
 
           {/* Consumption Chart */}
           <div data-tour="chart" className="glass-card p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-heading font-semibold">Actual vs AI Optimized</h3>
-              <div className="flex gap-2 text-xs">
-                <span className="chip">Today</span>
-                <span className="text-muted px-2 py-1">Week</span>
-                <span className="text-muted px-2 py-1">Month</span>
+            <div className="flex items-start justify-between mb-1 gap-3">
+              <div>
+                <h3 className="font-heading font-semibold">
+                  ML Forecast vs AI Optimized
+                </h3>
+                {forecast ? (
+                  <p className="text-[10px] text-muted mt-0.5">
+                    Ridge + logistic regression trained on{" "}
+                    {forecast.model.dataSource.rows.toLocaleString()} hourly samples
+                    ({forecast.model.dataSource.days} days),{" "}
+                    {forecast.model.features} engineered features
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-muted mt-0.5">
+                    {forecastError
+                      ? `Model endpoint unreachable (${forecastError}) — showing static reference curve`
+                      : "Loading model forecast…"}
+                  </p>
+                )}
               </div>
+              {forecast && (
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-[9px] px-2 py-0.5 rounded-full bg-ai/10 text-ai border border-ai/30 font-medium whitespace-nowrap">
+                    LIVE ML MODEL
+                  </span>
+                  <span className="text-[9px] text-muted font-mono-num whitespace-nowrap">
+                    R² {forecast.model.regression.r2.toFixed(2)} · F1{" "}
+                    {forecast.model.classification.f1.toFixed(2)} · MAE{" "}
+                    {forecast.model.regression.mae_kw.toFixed(2)} kW
+                  </span>
+                </div>
+              )}
             </div>
+
+            {/* Stated plainly: on peak *identification* a fixed tariff-window rule
+                is nearly as good, so the honest claim is the load magnitude the
+                clock cannot produce at all. */}
+            {forecast && (
+              <p className="text-[10px] text-muted mb-3">
+                Predicts load magnitude to ±
+                <span className="font-mono-num text-green-savings">
+                  {forecast.model.regression.mae_kw.toFixed(2)} kW
+                </span>{" "}
+                (R² {forecast.model.regression.r2.toFixed(2)}) — a fixed schedule
+                gives no magnitude at all. On peak-hour flagging it edges out a
+                “peak = 6–10 PM” rule (F1{" "}
+                {forecast.model.classification.f1.toFixed(2)} vs{" "}
+                {forecast.model.baselineF1.toFixed(2)}).
+              </p>
+            )}
+
             <ResponsiveContainer width="100%" height={230}>
-              <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+              <AreaChart data={chartRows} margin={{ top: 18, right: 6, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id="actual" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#EF4444" stopOpacity={0.3} />
+                    <stop offset="5%"  stopColor="#EF4444" stopOpacity={0.18} />
                     <stop offset="95%" stopColor="#EF4444" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="opt" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#16F08B" stopOpacity={0.3} />
+                    <stop offset="5%"  stopColor="#16F08B" stopOpacity={0.14} />
                     <stop offset="95%" stopColor="#16F08B" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis dataKey="time" stroke="#555" fontSize={11} tick={{ fill: "#666" }} />
-                <YAxis stroke="#555" fontSize={11} unit=" kW" tick={{ fill: "#666" }} />
+                <XAxis dataKey="time" stroke="#555" fontSize={11} tick={{ fill: "#666" }} interval="preserveStartEnd" minTickGap={18} />
+                {/* Headroom above the data so the Peak marker never clips the curve. */}
+                <YAxis
+                  stroke="#555" fontSize={11} unit=" kW" tick={{ fill: "#666" }}
+                  domain={["auto", (dataMax: number) => Math.ceil(dataMax * 1.18 * 10) / 10]}
+                />
                 <Tooltip
                   contentStyle={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 8, fontSize: 12 }}
                   labelStyle={{ color: "#F8FAFC", fontWeight: 600 }}
                 />
-                <ReferenceLine x="5PM" stroke="rgba(245,158,11,0.3)" strokeDasharray="4 4" label={{ value: "Peak", fill: "#F59E0B", fontSize: 10 }} />
-                <ReferenceLine x="9PM" stroke="rgba(245,158,11,0.3)" strokeDasharray="4 4" />
-                <Area type="monotone" dataKey="actual"    stroke="#EF4444" fill="url(#actual)" strokeWidth={2} name="Actual" />
-                <Area type="monotone" dataKey="optimized" stroke="#16F08B" fill="url(#opt)"    strokeWidth={2} name="AI Optimized" />
+                {/* Peak markers come from the classifier, not a hardcoded clock. */}
+                {(forecast
+                  ? forecast.curve.filter((c) => c.isPredictedPeak).map((c) => c.label)
+                  : ["5PM", "9PM"]
+                ).map((label, i) => (
+                  <ReferenceLine
+                    key={label}
+                    x={label}
+                    stroke="rgba(245,158,11,0.5)"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 4"
+                    label={i === 0 ? { value: "▼ Peak", fill: "#F59E0B", fontSize: 11, position: "top" } : undefined}
+                  />
+                ))}
+                {/* Thick strokes + a dot on every hour keep both curves legible at
+                    all 24 points; fills stay faint so they never mask the gap
+                    between predicted and optimized load. Animation is off because
+                    Recharts hides dots until the draw-in animation finishes, and
+                    the demo sequence re-renders often enough to restart it forever. */}
+                <Area
+                  type="monotone" dataKey="actual" stroke="#EF4444" fill="url(#actual)"
+                  strokeWidth={3} name="Predicted Load" isAnimationActive={false}
+                  dot={{ r: 2.5, fill: "#EF4444", strokeWidth: 0 }}
+                  activeDot={{ r: 5, fill: "#EF4444", stroke: "#F8FAFC", strokeWidth: 2 }}
+                />
+                <Area
+                  type="monotone" dataKey="optimized" stroke="#16F08B" fill="url(#opt)"
+                  strokeWidth={3} name="AI Optimized" isAnimationActive={false}
+                  dot={{ r: 2.5, fill: "#16F08B", strokeWidth: 0 }}
+                  activeDot={{ r: 5, fill: "#16F08B", stroke: "#F8FAFC", strokeWidth: 2 }}
+                />
               </AreaChart>
             </ResponsiveContainer>
-            <div className="flex gap-4 mt-3 text-xs text-muted">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-danger inline-block rounded" /> Actual Usage</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-green-savings inline-block rounded" /> AI Optimized</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 bg-warning/15 inline-block rounded border border-warning/30" /> Peak Hours (5–9 PM)</span>
+            <div className="flex flex-wrap gap-4 mt-3 text-xs text-muted">
+              <span className="flex items-center gap-1.5"><span className="w-4 h-1 bg-danger inline-block rounded-full" /> Predicted Load (ML)</span>
+              <span className="flex items-center gap-1.5"><span className="w-4 h-1 bg-green-savings inline-block rounded-full" /> AI Optimized</span>
+              {forecast && (
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 bg-warning/15 inline-block rounded border border-warning/30" />
+                  Predicted peaks: {forecast.summary.predictedPeakHours.join(", ") || "none today"}
+                </span>
+              )}
             </div>
           </div>
 
-          {/* Energy Flow */}
+          {/* Energy Flow — Animated Power Pipeline */}
           <div className="glass-card p-5">
-            <h3 className="font-heading font-semibold mb-4">Energy Flow</h3>
-            <div className="flex flex-wrap items-center justify-center gap-3 py-3">
-              {[
-                { icon: Zap,     label: "Grid",    sub: "2.1 kW",                                                                                    color: "text-warning" },
-                null,
-                { icon: Sun,     label: "Solar",   sub: `${scenario.solar.toFixed(1)} kW`,                                                           color: "text-orange-golden" },
-                null,
-                { icon: Battery, label: "Battery", sub: demoStep >= 8 ? "Protected" : `${batteryReserve}%`, color: demoStep >= 8 ? "text-green-savings" : "text-ai" },
-                null,
-                { icon: Home,    label: "Home",    sub: `${load.toFixed(1)} kW`,                                                                     color: loadColor },
-              ].map((item, i) =>
-                item === null ? (
-                  <svg key={i} width="36" height="10">
-                    <line x1="0" y1="5" x2="36" y2="5" stroke="#FF8A00" strokeWidth="2" className="energy-line" opacity="0.5" />
-                  </svg>
-                ) : (
-                  <div key={i} className="flex flex-col items-center gap-1">
-                    <motion.div
-                      className="w-12 h-12 rounded-xl glass-card flex items-center justify-center"
-                      whileHover={{ scale: 1.1 }}
-                    >
-                      <item.icon size={20} className={item.color} />
-                    </motion.div>
-                    <span className="text-[10px] text-muted">{item.label}</span>
-                    <span className={`text-xs font-mono-num font-medium ${item.color}`}>{item.sub}</span>
-                  </div>
-                )
-              )}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-heading font-semibold">Energy Flow</h3>
+              <span className="text-[9px] px-2 py-0.5 rounded-full bg-green-savings/10 text-green-savings border border-green-savings/20">
+                {demoStep >= 8 ? "AI OPTIMIZED" : "LIVE FLOW"}
+              </span>
+            </div>
+            <div className="relative flex flex-wrap items-center justify-center gap-3 py-3">
+              {(() => {
+                const nodes = [
+                  { icon: Zap,     label: "Grid",    sub: "2.1 kW",      color: "text-warning",       glow: "rgba(245,158,11,0.4)",  active: true },
+                  { icon: Sun,     label: "Solar",   sub: `${scenario.solar.toFixed(1)} kW`, color: "text-orange-golden", glow: "rgba(255,170,0,0.4)",  active: scenario.solar > 0 },
+                  { icon: Battery, label: "Battery", sub: demoStep >= 8 ? "Protected" : `${batteryReserve}%`, color: demoStep >= 8 ? "text-green-savings" : "text-ai", glow: demoStep >= 8 ? "rgba(22,240,139,0.4)" : "rgba(56,189,248,0.4)", active: true },
+                  { icon: Home,    label: "Home",    sub: `${load.toFixed(1)} kW`, color: loadColor, glow: "rgba(255,138,0,0.4)", active: true },
+                ];
+                const flowColors = ["#F59E0B", "#FFAA00", demoStep >= 8 ? "#16F08B" : "#38BDF8"];
+                return (
+                  <>
+                    {nodes.map((node, i) => (
+                      <div key={node.label} className="flex items-center gap-3">
+                        <div className="flex flex-col items-center gap-1">
+                          <motion.div
+                            className="w-12 h-12 rounded-xl glass-card flex items-center justify-center relative"
+                            whileHover={{ scale: 1.1 }}
+                          >
+                            {node.active && (
+                              <motion.div
+                                className="absolute inset-0 rounded-xl"
+                                animate={{ boxShadow: [`0 0 8px ${node.glow}`, `0 0 20px ${node.glow}`, `0 0 8px ${node.glow}`] }}
+                                transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                              />
+                            )}
+                            <node.icon size={20} className={`${node.color} relative z-10`} />
+                          </motion.div>
+                          <span className="text-[10px] text-muted">{node.label}</span>
+                          <span className={`text-xs font-mono-num font-medium ${node.color}`}>{node.sub}</span>
+                        </div>
+                        {i < nodes.length - 1 && (
+                          <svg width="48" height="20" className="shrink-0 overflow-visible">
+                            {/* Base line */}
+                            <line x1="0" y1="10" x2="48" y2="10" stroke="rgba(255,255,255,0.08)" strokeWidth="3" strokeLinecap="round" />
+                            {/* Glow line */}
+                            <line x1="0" y1="10" x2="48" y2="10" stroke={flowColors[i]} strokeWidth="2" strokeLinecap="round" opacity="0.3" />
+                            {/* Animated flowing dot */}
+                            <circle r="3" fill={flowColors[i]} opacity="0.9">
+                              <animateMotion dur={`${1.2 + i * 0.3}s`} repeatCount="indefinite" path="M0,10 L48,10" />
+                            </circle>
+                            {/* Trailing glow */}
+                            <circle r="5" fill={flowColors[i]} opacity="0.3">
+                              <animateMotion dur={`${1.2 + i * 0.3}s`} repeatCount="indefinite" path="M0,10 L48,10" />
+                            </circle>
+                            {/* Second dot offset */}
+                            <circle r="2" fill={flowColors[i]} opacity="0.6">
+                              <animateMotion dur={`${1.2 + i * 0.3}s`} repeatCount="indefinite" path="M0,10 L48,10" begin={`${0.6 + i * 0.15}s`} />
+                            </circle>
+                            {/* Arrow tip */}
+                            <polygon points="44,6 48,10 44,14" fill={flowColors[i]} opacity="0.5" />
+                          </svg>
+                        )}
+                      </div>
+                    ))}
+                  </>
+                );
+              })()}
+            </div>
+            {/* Flow stats */}
+            <div className="flex justify-center gap-4 mt-2 text-[10px] text-muted">
+              <span className="flex items-center gap-1"><span className="w-2 h-0.5 bg-warning rounded inline-block" /> Grid feed</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-0.5 bg-orange-golden rounded inline-block" /> Solar feed</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-0.5 bg-ai rounded inline-block" /> Battery</span>
             </div>
           </div>
 

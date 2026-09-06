@@ -1,9 +1,129 @@
 import { NextResponse } from "next/server";
 
+// ── Tool / Function Schemas for Qwen function calling ──
+const PAKGRID_TOOLS = [
+  {
+    type: "function" as const,
+    function: {
+      name: "toggleRelay",
+      description:
+        "Toggle a specific appliance relay channel on the ESP32 edge device. Use this when the user asks to turn an appliance on or off (e.g. 'turn off the pump', 'switch on the AC').",
+      parameters: {
+        type: "object",
+        properties: {
+          channel: {
+            type: "integer",
+            description: "Relay channel number (1-4). CH1=AC, CH2=Water Pump, CH3=Phantom/Standby sockets, CH4=Spare.",
+            minimum: 1,
+            maximum: 4,
+          },
+          state: {
+            type: "boolean",
+            description: "true to turn ON (close relay), false to turn OFF (open relay).",
+          },
+          applianceName: {
+            type: "string",
+            description: "Human-readable name of the appliance being controlled (e.g. 'Water Pump', 'Bedroom AC').",
+          },
+        },
+        required: ["channel", "state"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "fetchEnergyStats",
+      description:
+        "Retrieve energy consumption statistics for a given time period. Use when the user asks about energy usage, consumption data, savings reports, or tariff costs.",
+      parameters: {
+        type: "object",
+        properties: {
+          period: {
+            type: "string",
+            enum: ["today", "this_week", "this_month", "last_month"],
+            description: "Time period for the energy stats.",
+          },
+          metric: {
+            type: "string",
+            enum: ["consumption_kwh", "cost_pkr", "savings_pkr", "peak_reduction", "solar_generation"],
+            description: "The specific metric to retrieve.",
+          },
+        },
+        required: ["period"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "analyzeBill",
+      description:
+        "Trigger the Bill Doctor OCR pipeline to analyze an electricity bill. Use when the user asks to analyze their bill, check bill breakdown, or get bill prescriptions.",
+      parameters: {
+        type: "object",
+        properties: {
+          monthlyAmount: {
+            type: "number",
+            description: "The total bill amount in PKR if known, otherwise omit.",
+          },
+          city: {
+            type: "string",
+            description: "City name for tariff profile lookup (e.g. Lahore, Karachi, Islamabad).",
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "setAcEcoMode",
+      description:
+        "Switch the air conditioner to Eco Mode with an optimized temperature setpoint. Use when user asks to save on AC, reduce AC costs, or optimize cooling.",
+      parameters: {
+        type: "object",
+        properties: {
+          setpoint: {
+            type: "integer",
+            description: "Target temperature in Celsius (recommended 24-26 for savings).",
+            minimum: 18,
+            maximum: 30,
+          },
+          durationHours: {
+            type: "number",
+            description: "How many hours to keep Eco Mode active.",
+          },
+        },
+        required: ["setpoint"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "getBlackoutRisk",
+      description:
+        "Get the current load-shedding / blackout risk prediction for the user's area. Use when user asks about power outages, load shedding, or battery backup.",
+      parameters: {
+        type: "object",
+        properties: {
+          city: {
+            type: "string",
+            description: "City name (Lahore, Karachi, Islamabad).",
+          },
+        },
+        required: [],
+      },
+    },
+  },
+];
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { message, applianceContext, history = [] } = body;
+    const { message, applianceContext, history = [], stream: wantStream = false, toolResults } = body;
 
     if (!message && !applianceContext) {
       return NextResponse.json(
@@ -25,8 +145,17 @@ Context and Market Knowledge:
 - Phantom loads (TV standby, set-top boxes, chargers, idling inverters) drain 10-15% of power unnecessarily.
 - Load-shedding requires conserving battery storage for essential loads (fans, LED lights, Wi-Fi router, refrigerator).
 
+Your Capabilities:
+You have access to real tools that can CONTROL actual hardware devices, FETCH live data, and TRIGGER analysis pipelines. When a user asks you to perform an action (like turning off a pump, checking energy stats, or analyzing a bill), you MUST use the appropriate tool/function call rather than just describing what could be done. Be proactive in using tools.
+
+Relay Channel Mapping:
+- CH1: Bedroom AC (1.5-ton, 1420W)
+- CH2: Water Pump (1-1.5 HP, 1100W)
+- CH3: Phantom/Standby sockets (TV, chargers, 143W)
+- CH4: Spare
+
 Your Task:
-Provide concise, highly actionable, realistic recommendations in clean markdown. Mention exact appliance names, timing windows, and specific PKR rupee savings. Be confident, warm, and technical.`;
+Provide concise, highly actionable, realistic recommendations in clean markdown. Mention exact appliance names, timing windows, and specific PKR rupee savings. Be confident, warm, and technical. When you use a tool, briefly explain what you're doing and confirm the result.`;
 
     const messages: { role: string; content: string }[] = [
       { role: "system", content: systemPrompt },
@@ -49,6 +178,17 @@ Provide concise, highly actionable, realistic recommendations in clean markdown.
     }
 
     messages.push({ role: "user", content: userPrompt });
+
+    // If toolResults are provided, add them as tool messages for follow-up
+    if (toolResults && Array.isArray(toolResults)) {
+      for (const tr of toolResults) {
+        messages.push({
+          role: "tool",
+          content: JSON.stringify(tr.result),
+          tool_call_id: tr.tool_call_id || "",
+        } as { role: string; content: string });
+      }
+    }
 
     // 1. Attempt to call Alibaba Cloud Qwen (Model Studio / DashScope)
     if (apiKey) {
@@ -77,12 +217,60 @@ Provide concise, highly actionable, realistic recommendations in clean markdown.
                 messages,
                 temperature: 0.7,
                 max_tokens: 800,
+                stream: !!wantStream,
+                ...(wantStream ? {} : { tools: PAKGRID_TOOLS, tool_choice: "auto" }),
               }),
             });
 
             if (alibabaRes.ok) {
+              // If streaming requested, pipe the stream through
+              if (wantStream && alibabaRes.body) {
+                const upstream = alibabaRes.body;
+                const decoder = new TextDecoder();
+                const reader = upstream.getReader();
+                const enc = new TextEncoder();
+                const outStream = new ReadableStream({
+                  async pull(controller) {
+                    try {
+                      const { value, done } = await reader.read();
+                      if (done) { controller.enqueue(enc.encode("data: [DONE]\n\n")); controller.close(); return; }
+                      const chunk = decoder.decode(value, { stream: true });
+                      // Parse SSE lines from upstream and extract delta content
+                      for (const line of chunk.split("\n")) {
+                        if (!line.startsWith("data: ") || line === "data: [DONE]") continue;
+                        try {
+                          const json = JSON.parse(line.slice(6));
+                          const delta = json.choices?.[0]?.delta?.content;
+                          if (delta) {
+                            controller.enqueue(enc.encode(`data: ${JSON.stringify({ content: delta })}\n\n`));
+                          }
+                        } catch { /* skip partial chunks */ }
+                      }
+                    } catch { controller.close(); }
+                  },
+                });
+                return new Response(outStream, {
+                  headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
+                });
+              }
               const data = await alibabaRes.json();
-              const reply = data.choices?.[0]?.message?.content;
+              const choice = data.choices?.[0];
+              const reply = choice?.message?.content;
+              const toolCalls = choice?.message?.tool_calls;
+
+              // If Qwen wants to call tools, return them to the client for execution
+              if (toolCalls && toolCalls.length > 0) {
+                return NextResponse.json({
+                  content: reply || "",
+                  tool_calls: toolCalls.map((tc: { id: string; function: { name: string; arguments: string } }) => ({
+                    id: tc.id,
+                    name: tc.function.name,
+                    arguments: tc.function.arguments,
+                  })),
+                  source: "alibaba-qwen",
+                });
+              }
+
               if (reply) {
                 return NextResponse.json({ content: reply, source: "alibaba-qwen" });
               }
